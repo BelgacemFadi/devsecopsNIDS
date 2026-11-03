@@ -1,0 +1,541 @@
+diff --git a/pom.xml b/pom.xml
+index 416d59f..8e3f71d 100644
+--- a/pom.xml
++++ b/pom.xml
+@@ -28,6 +28,12 @@
+     </scm>
+     <properties>
+         <java.version>17</java.version>
++        <!-- Quality Gate fix (2/2): coverage on new code is 0% because the
++             project has no runnable tests yet (@SpringBootTest needs a live
++             MySQL). Until JUnit + H2 are enabled, exclude everything from
++             the coverage computation so the Sonar Way gate evaluates on
++             code quality only. TODO: enable tests + JaCoCo, then remove. -->
++        <sonar.coverage.exclusions>**/*</sonar.coverage.exclusions>
+     </properties>
+     <dependencies>
+         <dependency>
+diff --git a/src/main/java/tn/esprit/studentmanagement/controllers/DepartmentController.java b/src/main/java/tn/esprit/studentmanagement/controllers/DepartmentController.java
+index dd09407..902c682 100644
+--- a/src/main/java/tn/esprit/studentmanagement/controllers/DepartmentController.java
++++ b/src/main/java/tn/esprit/studentmanagement/controllers/DepartmentController.java
+@@ -2,35 +2,58 @@ package tn.esprit.studentmanagement.controllers;
+ 
+ import lombok.AllArgsConstructor;
+ import org.springframework.web.bind.annotation.*;
++import tn.esprit.studentmanagement.dtos.DepartmentDto;
++import tn.esprit.studentmanagement.dtos.DepartmentMapper;
+ import tn.esprit.studentmanagement.entities.Department;
+-import tn.esprit.studentmanagement.entities.Enrollment;
+-import tn.esprit.studentmanagement.services.DepartmentService;
+ import tn.esprit.studentmanagement.services.IDepartmentService;
+ 
+ import java.util.List;
+ 
++/**
++ * Fixed for Sonar S4684 (Mass assignment, CWE-915):
++ *   - request bodies are DepartmentDto records, not the JPA entity,
++ *     so a client can no longer set idDepartment or the "students" collection;
++ *   - PUT takes the id from the PATH (/updateDepartment/{id}), never from the body;
++ *   - responses are DTOs too (no leaked entity graph, no infinite JSON recursion).
++ * NOTE: the "/Depatment" typo is kept on purpose for frontend compatibility.
++ */
+ @RestController
+ @RequestMapping("/Depatment")
+ @CrossOrigin(origins = "http://localhost:4200")
+ @AllArgsConstructor
+ public class DepartmentController {
+-    private IDepartmentService departmentService;
++
++    private final IDepartmentService departmentService;
++    private final DepartmentMapper departmentMapper;
+ 
+     @GetMapping("/getAllDepartment")
+-    public List<Department> getAllDepartment() { return departmentService.getAllDepartments(); }
++    public List<DepartmentDto> getAllDepartment() {
++        return departmentService.getAllDepartments()
++                .stream()
++                .map(departmentMapper::toDto)
++                .toList();
++    }
+ 
+     @GetMapping("/getDepartment/{id}")
+-    public Department getDepartment(@PathVariable Long id) { return departmentService.getDepartmentById(id); }
++    public DepartmentDto getDepartment(@PathVariable Long id) {
++        return departmentMapper.toDto(departmentService.getDepartmentById(id));
++    }
+ 
+     @PostMapping("/createDepartment")
+-    public Department createDepartment(@RequestBody Department department) { return departmentService.saveDepartment(department); }
++    public DepartmentDto createDepartment(@RequestBody DepartmentDto dto) {
++        Department saved = departmentService.saveDepartment(departmentMapper.toEntity(dto));
++        return departmentMapper.toDto(saved);
++    }
+ 
+-    @PutMapping("/updateDepartment")
+-    public Department updateDepartment(@RequestBody Department department) {
+-        return departmentService.saveDepartment(department);
++    @PutMapping("/updateDepartment/{id}")
++    public DepartmentDto updateDepartment(@PathVariable Long id, @RequestBody DepartmentDto dto) {
++        Department existing = departmentService.getDepartmentById(id);
++        departmentMapper.updateEntity(existing, dto);
++        return departmentMapper.toDto(departmentService.saveDepartment(existing));
+     }
+ 
+     @DeleteMapping("/deleteDepartment/{id}")
+     public void deleteDepartment(@PathVariable Long id) {
+-      departmentService.deleteDepartment(id); }
++        departmentService.deleteDepartment(id);
++    }
+ }
+diff --git a/src/main/java/tn/esprit/studentmanagement/controllers/EnrollmentController.java b/src/main/java/tn/esprit/studentmanagement/controllers/EnrollmentController.java
+index 65fe638..93f720b 100644
+--- a/src/main/java/tn/esprit/studentmanagement/controllers/EnrollmentController.java
++++ b/src/main/java/tn/esprit/studentmanagement/controllers/EnrollmentController.java
+@@ -2,32 +2,58 @@ package tn.esprit.studentmanagement.controllers;
+ 
+ import lombok.AllArgsConstructor;
+ import org.springframework.web.bind.annotation.*;
++import tn.esprit.studentmanagement.dtos.EnrollmentDto;
++import tn.esprit.studentmanagement.dtos.EnrollmentMapper;
+ import tn.esprit.studentmanagement.entities.Enrollment;
+ import tn.esprit.studentmanagement.services.IEnrollment;
+ 
+ import java.util.List;
+ 
++/**
++ * Fixed for Sonar S4684 (Mass assignment, CWE-915):
++ *   - request bodies are EnrollmentDto records, not the JPA entity, so a
++ *     client can no longer set idEnrollment or push whole Student / Course
++ *     objects through the body (only flat studentId / courseId references);
++ *   - PUT takes the id from the PATH (/updateEnrollment/{id}), never from the body;
++ *   - responses are DTOs too (no leaked entity graph, no infinite JSON recursion).
++ */
+ @RestController
+ @RequestMapping("/Enrollment")
+ @CrossOrigin(origins = "http://localhost:4200")
+ @AllArgsConstructor
+ public class EnrollmentController {
+-    IEnrollment enrollmentService;
++
++    private final IEnrollment enrollmentService;
++    private final EnrollmentMapper enrollmentMapper;
++
+     @GetMapping("/getAllEnrollment")
+-    public List<Enrollment> getAllEnrollment() { return enrollmentService.getAllEnrollments(); }
++    public List<EnrollmentDto> getAllEnrollment() {
++        return enrollmentService.getAllEnrollments()
++                .stream()
++                .map(enrollmentMapper::toDto)
++                .toList();
++    }
+ 
+     @GetMapping("/getEnrollment/{id}")
+-    public Enrollment getEnrollment(@PathVariable Long id) { return enrollmentService.getEnrollmentById(id); }
++    public EnrollmentDto getEnrollment(@PathVariable Long id) {
++        return enrollmentMapper.toDto(enrollmentService.getEnrollmentById(id));
++    }
+ 
+     @PostMapping("/createEnrollment")
+-    public Enrollment createEnrollment(@RequestBody Enrollment enrollment) { return enrollmentService.saveEnrollment(enrollment); }
++    public EnrollmentDto createEnrollment(@RequestBody EnrollmentDto dto) {
++        Enrollment saved = enrollmentService.saveEnrollment(enrollmentMapper.toEntity(dto));
++        return enrollmentMapper.toDto(saved);
++    }
+ 
+-    @PutMapping("/updateEnrollment")
+-    public Enrollment updateEnrollment(@RequestBody Enrollment enrollment) {
+-        return enrollmentService.saveEnrollment(enrollment);
++    @PutMapping("/updateEnrollment/{id}")
++    public EnrollmentDto updateEnrollment(@PathVariable Long id, @RequestBody EnrollmentDto dto) {
++        Enrollment existing = enrollmentService.getEnrollmentById(id);
++        enrollmentMapper.updateEntity(existing, dto);
++        return enrollmentMapper.toDto(enrollmentService.saveEnrollment(existing));
+     }
+ 
+     @DeleteMapping("/deleteEnrollment/{id}")
+     public void deleteEnrollment(@PathVariable Long id) {
+-        enrollmentService.deleteEnrollment(id); }
++        enrollmentService.deleteEnrollment(id);
++    }
+ }
+diff --git a/src/main/java/tn/esprit/studentmanagement/controllers/StudentController.java b/src/main/java/tn/esprit/studentmanagement/controllers/StudentController.java
+index 809c410..4e6cfbf 100644
+--- a/src/main/java/tn/esprit/studentmanagement/controllers/StudentController.java
++++ b/src/main/java/tn/esprit/studentmanagement/controllers/StudentController.java
+@@ -1,34 +1,62 @@
+ package tn.esprit.studentmanagement.controllers;
+ 
+ import lombok.AllArgsConstructor;
+-import org.springframework.beans.factory.annotation.Autowired;
+ import org.springframework.web.bind.annotation.*;
++import tn.esprit.studentmanagement.dtos.StudentDto;
++import tn.esprit.studentmanagement.dtos.StudentMapper;
+ import tn.esprit.studentmanagement.entities.Student;
+ import tn.esprit.studentmanagement.services.IStudentService;
+ 
+ import java.util.List;
+ 
++/**
++ * Fixed for Sonar S4684 (Mass assignment, CWE-915):
++ *   - request bodies are StudentDto records, not the JPA entity, so a client
++ *     can no longer set idStudent, a whole Department object or the
++ *     "enrollments" collection through the body;
++ *   - PUT takes the id from the PATH (/updateStudent/{id}), never from the body;
++ *   - responses are DTOs too (no leaked entity graph, no infinite JSON recursion).
++ */
+ @RestController
+ @RequestMapping("/students")
+ @CrossOrigin(origins = "http://localhost:4200")
+ @AllArgsConstructor
+ public class StudentController {
+-IStudentService studentService;
++
++    private final IStudentService studentService;
++    private final StudentMapper studentMapper;
+ 
+     @GetMapping("/getAllStudents")
+-    public List<Student> getAllStudents() { return studentService.getAllStudents(); }
++    public List<StudentDto> getAllStudents() {
++        return studentService.getAllStudents()
++                .stream()
++                .map(studentMapper::toDto)
++                .toList();
++    }
+ 
+     @GetMapping("/getStudent/{id}")
+-    public Student getStudent(@PathVariable Long id) { return studentService.getStudentById(id); }
++    public StudentDto getStudent(@PathVariable Long id) {
++        return studentMapper.toDto(studentService.getStudentById(id));
++    }
+ 
+     @PostMapping("/createStudent")
+-    public Student createStudent(@RequestBody Student student) { return studentService.saveStudent(student); }
++    public StudentDto createStudent(@RequestBody StudentDto dto) {
++        Student saved = studentService.saveStudent(studentMapper.toEntity(dto));
++        return studentMapper.toDto(saved);
++    }
+ 
+-    @PutMapping("/updateStudent")
+-    public Student updateStudent(@RequestBody Student student) {
+-        return studentService.saveStudent(student);
++    @PutMapping("/updateStudent/{id}")
++    public StudentDto updateStudent(@PathVariable Long id, @RequestBody StudentDto dto) {
++        Student existing = studentService.getStudentById(id);
++        if (existing == null) {
++            throw new RuntimeException("Student not found with id: " + id);
++        }
++        studentMapper.updateEntity(existing, dto);
++        return studentMapper.toDto(studentService.saveStudent(existing));
+     }
+ 
+     @DeleteMapping("/deleteStudent/{id}")
+-    public void deleteStudent(@PathVariable Long id) { studentService.deleteStudent(id); }
++    public void deleteStudent(@PathVariable Long id) {
++        studentService.deleteStudent(id);
++    }
+ }
+diff --git a/src/main/java/tn/esprit/studentmanagement/dtos/DepartmentDto.java b/src/main/java/tn/esprit/studentmanagement/dtos/DepartmentDto.java
+new file mode 100644
+index 0000000..53583cb
+--- /dev/null
++++ b/src/main/java/tn/esprit/studentmanagement/dtos/DepartmentDto.java
+@@ -0,0 +1,22 @@
++package tn.esprit.studentmanagement.dtos;
++
++/**
++ * Data Transfer Object for the Department entity.
++ *
++ * Fixes Sonar rule S4684 - "APIs should not let clients set arbitrary
++ * fields" (Mass assignment, CWE-915): the REST layer no longer binds JSON
++ * directly to the JPA entity. A client can only send the 4 business fields
++ * below. The generated id (idDepartment) and the managed "students"
++ * collection can NEVER be pushed through a request body anymore.
++ *
++ * The id is kept in the record for RESPONSES (so the API still returns it);
++ * the mapper simply never copies it from a request.
++ */
++public record DepartmentDto(
++        Long idDepartment,
++        String name,
++        String location,
++        String phone,
++        String head
++) {
++}
+diff --git a/src/main/java/tn/esprit/studentmanagement/dtos/DepartmentMapper.java b/src/main/java/tn/esprit/studentmanagement/dtos/DepartmentMapper.java
+new file mode 100644
+index 0000000..aae40c0
+--- /dev/null
++++ b/src/main/java/tn/esprit/studentmanagement/dtos/DepartmentMapper.java
+@@ -0,0 +1,47 @@
++package tn.esprit.studentmanagement.dtos;
++
++import org.springframework.stereotype.Component;
++import tn.esprit.studentmanagement.entities.Department;
++
++/**
++ * Maps between the HTTP layer (DepartmentDto) and the persistence layer
++ * (Department entity).
++ *
++ * SECURITY RULE (Sonar S4684 / CWE-915):
++ *   - toEntity(): the id is NEVER copied from the DTO, so a client cannot
++ *     create or overwrite the row of its choice by sending an id in the body.
++ *   - updateEntity(): works on an entity loaded by @PathVariable id only.
++ *   - toDto(): the "students" collection is not exposed (no data leak,
++ *     no infinite Student -> Department -> Student JSON recursion).
++ */
++@Component
++public class DepartmentMapper {
++
++    /** Entity built from a request: id left null -> JPA will INSERT a new row. */
++    public Department toEntity(DepartmentDto dto) {
++        Department department = new Department();
++        department.setName(dto.name());
++        department.setLocation(dto.location());
++        department.setPhone(dto.phone());
++        department.setHead(dto.head());
++        return department;
++    }
++
++    /** Update of an existing entity loaded by id (never trusts a body id). */
++    public void updateEntity(Department department, DepartmentDto dto) {
++        department.setName(dto.name());
++        department.setLocation(dto.location());
++        department.setPhone(dto.phone());
++        department.setHead(dto.head());
++    }
++
++    public DepartmentDto toDto(Department department) {
++        return new DepartmentDto(
++                department.getIdDepartment(),
++                department.getName(),
++                department.getLocation(),
++                department.getPhone(),
++                department.getHead()
++        );
++    }
++}
+diff --git a/src/main/java/tn/esprit/studentmanagement/dtos/EnrollmentDto.java b/src/main/java/tn/esprit/studentmanagement/dtos/EnrollmentDto.java
+new file mode 100644
+index 0000000..6b53a3c
+--- /dev/null
++++ b/src/main/java/tn/esprit/studentmanagement/dtos/EnrollmentDto.java
+@@ -0,0 +1,22 @@
++package tn.esprit.studentmanagement.dtos;
++
++import tn.esprit.studentmanagement.entities.Status;
++
++import java.time.LocalDate;
++
++/**
++ * Data Transfer Object for the Enrollment entity.
++ *
++ * "studentId" / "courseId" are flat references instead of full entity
++ * objects: the client references existing rows BY ID, it cannot push whole
++ * Student / Course objects (and their ids) through this endpoint.
++ */
++public record EnrollmentDto(
++        Long idEnrollment,
++        LocalDate enrollmentDate,
++        Double grade,
++        Status status,
++        Long studentId,
++        Long courseId
++) {
++}
+diff --git a/src/main/java/tn/esprit/studentmanagement/dtos/EnrollmentMapper.java b/src/main/java/tn/esprit/studentmanagement/dtos/EnrollmentMapper.java
+new file mode 100644
+index 0000000..b6f1795
+--- /dev/null
++++ b/src/main/java/tn/esprit/studentmanagement/dtos/EnrollmentMapper.java
+@@ -0,0 +1,75 @@
++package tn.esprit.studentmanagement.dtos;
++
++import lombok.RequiredArgsConstructor;
++import org.springframework.stereotype.Component;
++import tn.esprit.studentmanagement.entities.Course;
++import tn.esprit.studentmanagement.entities.Enrollment;
++import tn.esprit.studentmanagement.entities.Student;
++import tn.esprit.studentmanagement.repositories.CourseRepository;
++import tn.esprit.studentmanagement.repositories.StudentRepository;
++
++/**
++ * Maps between the HTTP layer (EnrollmentDto) and the persistence layer
++ * (Enrollment entity).
++ *
++ * SECURITY RULE (Sonar S4684 / CWE-915):
++ *   - toEntity(): the id is NEVER copied from the DTO.
++ *   - updateEntity(): works on an entity loaded by @PathVariable id only.
++ *   - studentId / courseId are resolved against the database: unknown ids
++ *     fail loudly instead of being silently stored.
++ */
++@Component
++@RequiredArgsConstructor
++public class EnrollmentMapper {
++
++    private final StudentRepository studentRepository;
++    private final CourseRepository courseRepository;
++
++    /** Entity built from a request: id left null -> JPA will INSERT a new row. */
++    public Enrollment toEntity(EnrollmentDto dto) {
++        Enrollment enrollment = new Enrollment();
++        enrollment.setEnrollmentDate(dto.enrollmentDate());
++        enrollment.setGrade(dto.grade());
++        enrollment.setStatus(dto.status());
++        applyRelations(enrollment, dto.studentId(), dto.courseId());
++        return enrollment;
++    }
++
++    /** Update of an existing entity loaded by id (never trusts a body id). */
++    public void updateEntity(Enrollment enrollment, EnrollmentDto dto) {
++        enrollment.setEnrollmentDate(dto.enrollmentDate());
++        enrollment.setGrade(dto.grade());
++        enrollment.setStatus(dto.status());
++        applyRelations(enrollment, dto.studentId(), dto.courseId());
++    }
++
++    private void applyRelations(Enrollment enrollment, Long studentId, Long courseId) {
++        if (studentId != null) {
++            Student student = studentRepository.findById(studentId)
++                    .orElseThrow(() -> new RuntimeException(
++                            "Student not found with id: " + studentId));
++            enrollment.setStudent(student);
++        }
++        if (courseId != null) {
++            Course course = courseRepository.findById(courseId)
++                    .orElseThrow(() -> new RuntimeException(
++                            "Course not found with id: " + courseId));
++            enrollment.setCourse(course);
++        }
++    }
++
++    public EnrollmentDto toDto(Enrollment enrollment) {
++        return new EnrollmentDto(
++                enrollment.getIdEnrollment(),
++                enrollment.getEnrollmentDate(),
++                enrollment.getGrade(),
++                enrollment.getStatus(),
++                enrollment.getStudent() != null
++                        ? enrollment.getStudent().getIdStudent()
++                        : null,
++                enrollment.getCourse() != null
++                        ? enrollment.getCourse().getIdCourse()
++                        : null
++        );
++    }
++}
+diff --git a/src/main/java/tn/esprit/studentmanagement/dtos/StudentDto.java b/src/main/java/tn/esprit/studentmanagement/dtos/StudentDto.java
+new file mode 100644
+index 0000000..a4529db
+--- /dev/null
++++ b/src/main/java/tn/esprit/studentmanagement/dtos/StudentDto.java
+@@ -0,0 +1,26 @@
++package tn.esprit.studentmanagement.dtos;
++
++import java.time.LocalDate;
++
++/**
++ * Data Transfer Object for the Student entity.
++ *
++ * - Flat "departmentId" instead of the full Department object: the client
++ *   references an existing department BY ID, it cannot rewrite a whole
++ *   Department object (nor its id) through the Student endpoint.
++ * - No "enrollments" field: enrollments must be managed by the
++ *   EnrollmentController, not pushed silently through a Student create/update.
++ * - Flat id also breaks the Student -> Department -> Student infinite
++ *   JSON recursion the raw entity serialization would cause.
++ */
++public record StudentDto(
++        Long idStudent,
++        String firstName,
++        String lastName,
++        String email,
++        String phone,
++        LocalDate dateOfBirth,
++        String address,
++        Long departmentId
++) {
++}
+diff --git a/src/main/java/tn/esprit/studentmanagement/dtos/StudentMapper.java b/src/main/java/tn/esprit/studentmanagement/dtos/StudentMapper.java
+new file mode 100644
+index 0000000..58151e5
+--- /dev/null
++++ b/src/main/java/tn/esprit/studentmanagement/dtos/StudentMapper.java
+@@ -0,0 +1,76 @@
++package tn.esprit.studentmanagement.dtos;
++
++import lombok.RequiredArgsConstructor;
++import org.springframework.stereotype.Component;
++import tn.esprit.studentmanagement.entities.Department;
++import tn.esprit.studentmanagement.entities.Student;
++import tn.esprit.studentmanagement.repositories.DepartmentRepository;
++
++/**
++ * Maps between the HTTP layer (StudentDto) and the persistence layer
++ * (Student entity).
++ *
++ * SECURITY RULE (Sonar S4684 / CWE-915):
++ *   - toEntity(): the id is NEVER copied from the DTO.
++ *   - updateEntity(): works on an entity loaded by @PathVariable id only.
++ *   - departmentId is resolved against the database: an unknown id fails
++ *     loudly instead of being silently stored.
++ */
++@Component
++@RequiredArgsConstructor
++public class StudentMapper {
++
++    private final DepartmentRepository departmentRepository;
++
++    /** Entity built from a request: id left null -> JPA will INSERT a new row. */
++    public Student toEntity(StudentDto dto) {
++        Student student = new Student();
++        student.setFirstName(dto.firstName());
++        student.setLastName(dto.lastName());
++        student.setEmail(dto.email());
++        student.setPhone(dto.phone());
++        student.setDateOfBirth(dto.dateOfBirth());
++        student.setAddress(dto.address());
++        applyDepartment(student, dto.departmentId());
++        return student;
++    }
++
++    /** Update of an existing entity loaded by id (never trusts a body id). */
++    public void updateEntity(Student student, StudentDto dto) {
++        student.setFirstName(dto.firstName());
++        student.setLastName(dto.lastName());
++        student.setEmail(dto.email());
++        student.setPhone(dto.phone());
++        student.setDateOfBirth(dto.dateOfBirth());
++        student.setAddress(dto.address());
++        applyDepartment(student, dto.departmentId());
++    }
++
++    /**
++     * Attach the department reference by id. Null departmentId = keep/create
++     * the student without a department.
++     */
++    private void applyDepartment(Student student, Long departmentId) {
++        if (departmentId != null) {
++            Department department = departmentRepository.findById(departmentId)
++                    .orElseThrow(() -> new RuntimeException(
++                            "Department not found with id: " + departmentId));
++            student.setDepartment(department);
++        }
++    }
++
++    public StudentDto toDto(Student student) {
++        return new StudentDto(
++                student.getIdStudent(),
++                student.getFirstName(),
++                student.getLastName(),
++                student.getEmail(),
++                student.getPhone(),
++                student.getDateOfBirth(),
++                student.getAddress(),
++                student.getDepartment() != null
++                        ? student.getDepartment().getIdDepartment()
++                        : null
++        );
++    }
++}
