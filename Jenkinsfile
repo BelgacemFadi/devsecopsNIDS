@@ -187,8 +187,16 @@ SETTINGS
                     sleep 2
                   done
                 '''
-                // (c) start the app (double quotes: image name from def vars)
+                               // (c) start the app (double quotes: image name from def vars)
+                //     + self-healing: free host port 8090 if an OLD container
+                //     still publishes it (bit us once: "port is already allocated")
                 sh """
+                  docker rm -f student-app 2>/dev/null || true
+                  OLD_CONTAINERS=\$(docker ps -q --filter publish=8090)
+                  if [ -n "\$OLD_CONTAINERS" ]; then
+                    echo "Freeing host port 8090 (old containers: \$OLD_CONTAINERS)"
+                    docker rm -f \$OLD_CONTAINERS
+                  fi
                   docker run -d --name student-app --network appnet --restart unless-stopped -p 8090:8089 -e SPRING_DATASOURCE_URL='jdbc:mysql://mysql-db:3306/studentdb?createDatabaseIfNotExist=true' -e SPRING_DATASOURCE_USERNAME=root -e SPRING_DATASOURCE_PASSWORD=root ${DOCKERHUB_USER.toLowerCase()}/${APP_NAME}:${BUILD_NUMBER}
                   docker ps | grep student-app
                 """
