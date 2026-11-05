@@ -1,3 +1,4 @@
+
 // ==========================================================================
 // DevSecOps CI/CD Pipeline - student-management (devopsNIDS repo)
 // ESPRIT 5th year - same validated 7-stage pattern as the demo pipeline:
@@ -14,10 +15,7 @@
 //
 // BEFORE FIRST RUN:
 //   1) DOCKERHUB_USER below = your Docker Hub username
-//   2) pom.xml: bump sonar-maven-plugin 3.9.1.2184 -> 5.0.0.4389
-//      (5.0.0.4389 is PROVEN against our SonarQube server in the lab;
-//      scanner 3.9.x is too old for recent SonarQube servers)
-//   3) credentials, same IDs as the demo pipeline:
+//   2) credentials, same IDs as the demo pipeline:
 //      github-creds | sonar-token | nexus-creds | dockerhub-creds
 //
 // QUOTING RULE (cost us one build in the demo: empty Sonar project key):
@@ -61,6 +59,38 @@ pipeline {
         }
 
         // ------------------------------------------------------------------
+        // STAGE 1b - Secret detection (DevSecOps Phase 1: Lab 1 + gitleaks).
+        // Started from the PLAN-AHEAD sketch (bottom of this file) and
+        // hardened it:
+        //   --no-git       scan THIS build's working tree, not git history
+        //   --redact       mask secret values in the Jenkins console output
+        //   --exit-code 1  fail the stage when leaks are found (already the
+        //                  default - kept explicit so the policy is visible)
+        //   --report-path  JSON report archived in the post block below
+        //   --user         run as the jenkins uid so the report is not left
+        //                  root-owned inside the workspace
+        // Quoting: SINGLE quotes - only bash $(...) inside, no Groovy def vars.
+        // First run on an old repo? Temporarily use --exit-code 0 to see the
+        // findings without failing, review, then flip back to --exit-code 1.
+        // ------------------------------------------------------------------
+        stage('1b. Scan Secrets (gitleaks)') {
+            steps {
+                sh '''
+                  docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/repo" -w /repo \
+                    zricethezav/gitleaks:latest detect --source /repo --no-git \
+                    --redact --verbose --exit-code 1 \
+                    --report-path /repo/gitleaks-report.json
+                '''
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'gitleaks-report.json',
+                                     allowEmptyArchive: true
+                }
+            }
+        }
+
+        // ------------------------------------------------------------------
         // STAGE 2 - Build.
         // -DskipTests on purpose: the generated @SpringBootTest context test
         // needs a LIVE MySQL, which a bare build stage does not have.
@@ -77,6 +107,26 @@ pipeline {
                     junit allowEmptyResults: true,
                           testResults: 'target/surefire-reports/*.xml'
                 }
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // STAGE 2b - Lab 2: Retire.js SCA (JavaScript dependencies).
+        // This repo is pure Java (no package.json), so `when` SKIPS the
+        // stage today - the gate EXISTS and arms itself the day any JS code
+        // (frontend, node tooling) enters the repo.
+        // Lab 2 evidence is produced manually on the Angular test project
+        // (see lab walkthrough). retire exits with code 13 when it finds
+        // vulnerable libraries; --exitwith 1 makes that explicit.
+        // Quoting: SINGLE quotes - no Groovy def vars inside.
+        // ------------------------------------------------------------------
+        stage('2b. Retire.js SCA (JS dependencies)') {
+            when { expression { return fileExists('package.json') } }
+            steps {
+                sh '''
+                  docker run --rm -v "$PWD:/src" -w /src node:20-alpine \
+                    sh -c "npm install --ignore-scripts --no-audit --no-fund && npm install -g retire && retire --path . --exitwith 1"
+                '''
             }
         }
 
@@ -219,23 +269,14 @@ SETTINGS
         }
 
         // ==================================================================
-        //  PLAN-AHEAD: DevSecOps stage 1 hooks (same as the demo pipeline -
-        //  uncomment when the teacher introduces Phase 1, BEFORE stage 4).
+        //  PLAN-AHEAD: DevSecOps Phase 1 (remaining NEXT STEPS).
+        //  [x] Secrets detection    -> IMPLEMENTED above as stage '1b. Scan
+        //      Secrets (gitleaks)' (uncommented + hardened from this sketch)
+        //  [ ] Vulnerable Java deps -> NEXT STEP 2: OWASP Dependency-Check
+        //      (free NVD API key needed; will flag springdoc 2.1.0 -> 2.8.9)
+        //  [ ] Container images     -> NEXT STEP 3: Trivy (after docker.build,
+        //      before push) + one-off Docker Bench
         // ==================================================================
-        // Secrets detection:
-        //   stage('Scan Secrets (gitleaks)') {
-        //       steps { sh 'docker run --rm -v $PWD:/repo zricethezav/gitleaks:latest detect -s /repo --no-git -v' }
-        //   }
-        //
-        // Vulnerable dependencies (SCA):
-        //   stage('OWASP Dependency-Check') {
-        //       steps { sh 'mvn org.owasp:dependency-check-maven:check' }
-        //   }
-        //
-        // Container image vulnerabilities (after docker.build, before push):
-        //   stage('Trivy Image Scan') {
-        //       steps { sh "docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image --exit-code 1 --severity CRITICAL ${DOCKERHUB_USER.toLowerCase()}/${APP_NAME}:${BUILD_NUMBER}" }
-        //   }
     }
 
     post {
