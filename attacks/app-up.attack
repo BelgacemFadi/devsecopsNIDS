@@ -1,0 +1,28 @@
+Feature: Acceptance - application availability
+  The deployed app must actually serve its API before we ship it anywhere
+
+  Background:
+    Given "curl" is installed
+    And the following profile:
+      | name    | value                         |
+      | apphost | http://localhost:8090/student |
+
+  Scenario: The students API endpoint answers with HTTP 200
+    When I launch a "curl" attack with:
+      """
+      curl --silent --show-error --fail --output /dev/null --write-out "HTTP %{http_code}" <apphost>/students/getAllStudents
+      """
+    Then the output should contain:
+      """
+      HTTP 200
+      """
+
+  Scenario: The API documentation (Swagger UI) is served
+    When I launch a "curl" attack with:
+      """
+      curl --silent --show-error --fail --output /dev/null --write-out "HTTP %{http_code}" <apphost>/swagger-ui/index.html
+      """
+    Then the output should contain:
+      """
+      HTTP 200
+      """

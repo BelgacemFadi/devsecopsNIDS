@@ -1,0 +1,15 @@
+Feature: Acceptance - exposed attack surface
+  Only ports we intentionally publish may be open on the VM
+
+  Background:
+    Given "nmap" is installed
+
+  Scenario: The application port is open
+    When I launch an "nmap" attack with:
+      """
+      nmap --open -p 8080,8081,8090,9000 localhost
+      """
+    Then the output should contain:
+      """
+      8090/tcp open
+      """

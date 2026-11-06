@@ -4,6 +4,8 @@
 // ESPRIT 5th year - same validated 7-stage pattern as the demo pipeline:
 //   Git -> Jenkins -> SonarQube (SAST + quality gate) -> Nexus (artifacts)
 //     -> Docker Hub (images) -> Deploy + smoke test on the VM
+//   + ACCEPTANCE PHASE (Lab 3): stage 8 runs gauntlt attacks from the repo
+//   + PRODUCTION PHASE: stages 9-11 (approval gate -> prod deploy -> smoke)
 //
 // DIFFERENCES vs the demo pipeline (devsecops-cicd-lab):
 //   - pom.xml sits at the REPO ROOT (no app/ subfolder) -> no dir('app')
@@ -15,8 +17,14 @@
 //
 // BEFORE FIRST RUN:
 //   1) DOCKERHUB_USER below = your Docker Hub username
-//   2) credentials, same IDs as the demo pipeline:
+//   2) pom.xml: bump sonar-maven-plugin 3.9.1.2184 -> 5.0.0.4389
+//      (5.0.0.4389 is PROVEN against our SonarQube server in the lab;
+//      scanner 3.9.x is too old for recent SonarQube servers)
+//   3) credentials, same IDs as the demo pipeline:
 //      github-creds | sonar-token | nexus-creds | dockerhub-creds
+//   4) gauntlt installed on the VM:
+//      sudo apt install -y ruby ruby-dev build-essential nmap curl
+//      sudo gem install gauntlt --no-document
 //
 // QUOTING RULE (cost us one build in the demo: empty Sonar project key):
 //   variables from the `def` block are GROOVY variables, NOT shell env vars.
@@ -268,22 +276,117 @@ SETTINGS
             }
         }
 
+        // ------------------------------------------------------------------
+        // STAGE 8 - ACCEPTANCE PHASE (Lab 3): gauntlt attacks.
+        // The attacks live IN THE REPO (attacks/*.attack) - security
+        // acceptance criteria are versioned with the code they test.
+        // Bare `gauntlt` globs ./attacks/*.attack from the workspace and
+        // tests the DEPLOYED app (staging, port 8090) because stage 7 just
+        // proved it is up. gauntlt runs cucumber with --strict: any failed
+        // scenario exits non-zero and FAILS the build -> a real gate.
+        // Attacks: curl (business API 200 + Swagger UI 200),
+        //          nmap (only the ports we publish are open).
+        // ------------------------------------------------------------------
+        stage('8. Acceptance Tests (gauntlt)') {
+            steps {
+                sh 'gauntlt'
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // STAGE 9 - PRODUCTION PHASE: manual approval gate.
+        // A human decides promotion. Only builds that passed EVERY earlier
+        // gate (secrets, SCA, SAST, quality, artifact, image, deploy,
+        // acceptance) even REACH this prompt. In Jenkins, `input` pauses
+        // the pipeline until someone clicks Deploy to Production.
+        // ------------------------------------------------------------------
+        stage('9. Production Approval (manual gate)') {
+            steps {
+                input message: 'Promote build to PRODUCTION?', ok: 'Deploy to Production'
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // STAGE 10 - PRODUCTION PHASE: promote the SAME artifact.
+        // The image tag is the SAME ${BUILD_NUMBER} that passed acceptance
+        // - promotion, never rebuilding. Only the container name and host
+        // port differ (prod = 8091, staging = 8090). Same mysql-db sidecar
+        // over appnet, same SPRING_DATASOURCE_* env (copied from stage 7).
+        // Quoting: DOUBLE quotes - Groovy def vars + BUILD_NUMBER inside,
+        // bash vars escaped as \$ (same layout as stage 7c).
+        // ------------------------------------------------------------------
+        stage('10. Deploy to Production') {
+            steps {
+                sh """
+                  docker network create appnet 2>/dev/null || true
+                  docker rm -f student-app-prod 2>/dev/null || true
+                  OLD_PROD=\$(docker ps -q --filter publish=8091)
+                  if [ -n "\$OLD_PROD" ]; then
+                    echo "Freeing host port 8091 (old containers: \$OLD_PROD)"
+                    docker rm -f \$OLD_PROD
+                  fi
+                  docker run -d --name student-app-prod --network appnet --restart unless-stopped -p 8091:8089 -e SPRING_DATASOURCE_URL='jdbc:mysql://mysql-db:3306/studentdb?createDatabaseIfNotExist=true' -e SPRING_DATASOURCE_USERNAME=root -e SPRING_DATASOURCE_PASSWORD=root ${DOCKERHUB_USER.toLowerCase()}/${APP_NAME}:${BUILD_NUMBER}
+                  docker ps | grep student-app-prod
+                """
+            }
+        }
+
+        // ------------------------------------------------------------------
+        // STAGE 11 - PRODUCTION PHASE: smoke test.
+        // Prod must answer HTTP 200 on the BUSINESS API (not just any HTTP
+        // answer like stage 7 - production is the stricter environment).
+        // Retry loop: the JVM needs ~15s to boot (13.9s measured).
+        // Quoting: SINGLE quotes - pure bash, no Groovy vars.
+        // ------------------------------------------------------------------
+        stage('11. Production Smoke Test') {
+            steps {
+                sh '''
+                  for i in $(seq 1 12); do
+                    code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8091/student/students/getAllStudents || true)
+                    echo "Prod attempt $i -> $code"
+                    if [ "$code" = "200" ]; then
+                      echo "Production is UP - HTTP 200"
+                      exit 0
+                    fi
+                    sleep 5
+                  done
+                  echo "--- Production not reachable after 1 minute - last 60 log lines: ---"
+                  docker logs --tail 60 student-app-prod
+                  exit 1
+                '''
+            }
+        }
+
         // ==================================================================
         //  PLAN-AHEAD: DevSecOps Phase 1 (remaining NEXT STEPS).
-        //  [x] Secrets detection    -> IMPLEMENTED above as stage '1b. Scan
-        //      Secrets (gitleaks)' (uncommented + hardened from this sketch)
+        //  [x] Secrets detection    -> IMPLEMENTED: stage '1b. Scan Secrets
+        //      (gitleaks)' (uncommented + hardened from this sketch)
+        //  [x] Acceptance phase     -> IMPLEMENTED: stage '8. Acceptance
+        //      Tests (gauntlt)' (Lab 3: attacks/*.attack versioned in repo)
+        //  [x] Production phase     -> IMPLEMENTED: stages 9-11 (input gate,
+        //      promote SAME image to student-app-prod:8091, smoke test 200)
         //  [ ] Vulnerable Java deps -> NEXT STEP 2: OWASP Dependency-Check
         //      (free NVD API key needed; will flag springdoc 2.1.0 -> 2.8.9)
         //  [ ] Container images     -> NEXT STEP 3: Trivy (after docker.build,
         //      before push) + one-off Docker Bench
         // ==================================================================
+        // Vulnerable dependencies (SCA):
+        //   stage('OWASP Dependency-Check') {
+        //       steps { sh 'mvn org.owasp:dependency-check-maven:check' }
+        //   }
+        //
+        // Container image vulnerabilities (after docker.build, before push):
+        //   stage('Trivy Image Scan') {
+        //       steps { sh "docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image --exit-code 1 --severity CRITICAL ${DOCKERHUB_USER.toLowerCase()}/${APP_NAME}:${BUILD_NUMBER}" }
+        //   }
     }
 
     post {
         success {
-            echo 'SUCCESS: student-management deployed.'
-            echo 'Smoke test: http://192.168.33.10:8090/student/v3/api-docs'
-            echo 'Swagger UI: http://192.168.33.10:8090/student/swagger-ui/index.html'
+            echo 'SUCCESS: student-management deployed + acceptance-tested.'
+            echo 'Staging  : http://192.168.33.10:8090/student/v3/api-docs'
+            echo 'Swagger  : http://192.168.33.10:8090/student/swagger-ui/index.html'
+            echo 'Prod API : http://192.168.33.10:8091/student/students/getAllStudents'
         }
         failure {
             echo 'FAILED: open the red stage, then the classic Console Output for the full log.'
