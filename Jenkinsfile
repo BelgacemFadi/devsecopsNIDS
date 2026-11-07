@@ -359,7 +359,7 @@ SETTINGS
         stage('12. Configuration Safety Check') {
             steps {
                 sh '''
-                  echo "=== Configuration Safety Check (Slide 8) ==="
+                  echo "=== Configuration Safety Check  ==="
                   test "$(docker inspect -f '{{.State.Running}}' student-app-prod)" = "true"
                   echo "[OK] prod container is running"
 
@@ -381,7 +381,21 @@ SETTINGS
                 '''
             }
         }
-
+stage('13. Security Smoke Test (ZAP Baseline)') {
+    steps {
+        sh '''
+          echo "=== Security Smoke Test: ZAP Baseline Scan  ==="
+          mkdir -p "$PWD/zap"
+          docker pull zaproxy/zaproxy:stable
+          docker run --rm --network appnet -u root \
+            -v "$PWD/zap:/zap/wrk" \
+            zaproxy/zaproxy:stable \
+            zap-baseline.py -t http://student-app-prod:8089/student/swagger-ui/index.html -r zap_report.html -I
+          echo "=== ZAP Baseline Scan: COMPLETED ==="
+        '''
+        archiveArtifacts artifacts: 'zap/zap_report.html', fingerprint: true
+    }
+}
         // ==================================================================
         //  PLAN-AHEAD: DevSecOps Phase 1 (remaining NEXT STEPS).
         //  [x] Secrets detection    -> IMPLEMENTED: stage '1b. Scan Secrets
