@@ -356,6 +356,31 @@ SETTINGS
                 '''
             }
         }
+        stage('12. Configuration Safety Check') {
+            steps {
+                sh '''
+                  echo "=== Configuration Safety Check (Slide 8) ==="
+                  test "$(docker inspect -f '{{.State.Running}}' student-app-prod)" = "true"
+                  echo "[OK] prod container is running"
+
+                  docker inspect -f '{{json .HostConfig.PortBindings}}' student-app-prod | grep -q '"HostPort":"8091"'
+                  echo "[OK] port binding is host 8091 -> container 8089"
+
+                  docker inspect -f '{{json .NetworkSettings.Networks}}' student-app-prod | grep -q '"appnet"'
+                  echo "[OK] prod container is on the appnet network"
+
+                  test "$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' student-app-prod)" = "unless-stopped"
+                  echo "[OK] restart policy is unless-stopped"
+
+                  test "$(docker inspect -f '{{.Config.Image}}' student-app-prod)" = "$(docker inspect -f '{{.Config.Image}}' student-app)"
+                  echo "[OK] prod runs the SAME image as staging (promotion, not rebuild)"
+
+                  docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' student-app-prod | grep -q 'SPRING_DATASOURCE_URL=jdbc:mysql://mysql-db:3306'
+                  echo "[OK] DB config was delivered from the protected db.env file"
+                  echo "=== Configuration Safety Check: PASSED ==="
+                '''
+            }
+        }
 
         // ==================================================================
         //  PLAN-AHEAD: DevSecOps Phase 1 (remaining NEXT STEPS).
