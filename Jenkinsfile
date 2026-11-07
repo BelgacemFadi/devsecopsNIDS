@@ -386,10 +386,10 @@ stage('13. Security Smoke Test (ZAP Baseline)') {
         sh '''
           echo "=== Security Smoke Test: ZAP Baseline Scan  ==="
           mkdir -p "$PWD/zap"
-          docker pull zaproxy/zaproxy:stable
+          docker pull ghcr.io/zaproxy/zaproxy:stable
           docker run --rm --network appnet -u root \
             -v "$PWD/zap:/zap/wrk" \
-            zaproxy/zaproxy:stable \
+            ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py -t http://student-app-prod:8089/student/swagger-ui/index.html -r zap_report.html -I
           echo "=== ZAP Baseline Scan: COMPLETED ==="
         '''
