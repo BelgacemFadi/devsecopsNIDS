@@ -255,7 +255,7 @@ SETTINGS
                     echo "Freeing host port 8090 (old containers: \$OLD_CONTAINERS)"
                     docker rm -f \$OLD_CONTAINERS
                   fi
-                  docker run -d --name student-app --network appnet --restart unless-stopped -p 8090:8089 -e SPRING_DATASOURCE_URL='jdbc:mysql://mysql-db:3306/studentdb?createDatabaseIfNotExist=true' -e SPRING_DATASOURCE_USERNAME=root -e SPRING_DATASOURCE_PASSWORD=root ${DOCKERHUB_USER.toLowerCase()}/${APP_NAME}:${BUILD_NUMBER}
+                  docker run -d --env-file /var/lib/jenkins/db.env --name student-app --network appnet --restart unless-stopped -p 8090:8089 ${DOCKERHUB_USER.toLowerCase()}/${APP_NAME}:${BUILD_NUMBER}
                   docker ps | grep student-app
                 """
                 // (d) smoke test: any HTTP answer != 000 proves Tomcat is up
@@ -325,7 +325,7 @@ SETTINGS
                     echo "Freeing host port 8091 (old containers: \$OLD_PROD)"
                     docker rm -f \$OLD_PROD
                   fi
-                  docker run -d --name student-app-prod --network appnet --restart unless-stopped -p 8091:8089 -e SPRING_DATASOURCE_URL='jdbc:mysql://mysql-db:3306/studentdb?createDatabaseIfNotExist=true' -e SPRING_DATASOURCE_USERNAME=root -e SPRING_DATASOURCE_PASSWORD=root ${DOCKERHUB_USER.toLowerCase()}/${APP_NAME}:${BUILD_NUMBER}
+                  docker run -d --env-file /var/lib/jenkins/db.env --name student-app-prod --network appnet --restart unless-stopped -p 8091:8089 ${DOCKERHUB_USER.toLowerCase()}/${APP_NAME}:${BUILD_NUMBER}
                   docker ps | grep student-app-prod
                 """
             }
